@@ -1,0 +1,19 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+README.md
+docs/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build artifacts
+whelk
+*.exe
+*.test
+*.out
