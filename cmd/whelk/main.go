@@ -63,13 +63,14 @@ func main() {
 
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	// Attempt graceful shutdown
 	if err := server.Shutdown(ctx); err != nil {
+		cancel()
 		logger.Error("server shutdown failed", "error", err)
 		os.Exit(1)
 	}
+	cancel()
 
 	logger.Info("server shutdown complete")
 }

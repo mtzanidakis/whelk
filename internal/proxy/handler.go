@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -81,14 +82,15 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.transport.RoundTrip(outReq)
 	if err != nil {
 		h.logger.Error("upstream request failed", "error", err, "host", r.URL.Host)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
 			http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
 		} else {
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		}
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Copy response headers
 	copyHeaders(w.Header(), resp.Header)
@@ -114,17 +116,19 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dial the target server
+	//nolint:gosec // G704: a forward proxy is expected to dial client-specified hosts.
 	targetConn, err := net.DialTimeout("tcp", targetHost, h.timeout)
 	if err != nil {
 		h.logger.Error("failed to dial target", "error", err, "host", targetHost)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
 			http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
 		} else {
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		}
 		return
 	}
-	defer targetConn.Close()
+	defer func() { _ = targetConn.Close() }()
 
 	// Hijack the client connection
 	hijacker, ok := w.(http.Hijacker)
@@ -139,7 +143,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// Send 200 Connection Established
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
