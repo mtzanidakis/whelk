@@ -93,28 +93,41 @@ curl https://example.com
 
 ## Development
 
-### Run Tests
+Tooling is pinned with [mise](https://mise.jdx.dev/) (Go 1.27.1 and golangci-lint 2.13.2). Install the tools and run the tasks:
 
 ```bash
+mise install        # install pinned tool versions
+mise run build      # build the whelk binary
+mise run test       # run the unit tests
+mise run test:race  # run the unit tests with the race detector
+mise run test:cover # run the unit tests with coverage
+mise run lint       # run golangci-lint
+mise run vet        # run go vet
+mise run fmt        # format the Go source
+mise run ci         # run vet, lint, test and build
+```
+
+List every task with `mise tasks`.
+
+The equivalent commands without mise are:
+
+```bash
+go build -o whelk ./cmd/whelk
 go test ./...
-```
-
-### Run Tests with Coverage
-
-```bash
+go test -race ./...
 go test -cover ./...
-```
-
-### Run Tests with Verbose Output
-
-```bash
-go test -v ./...
+golangci-lint run
 ```
 
 ## Architecture
 
 ```
 /
+├── .github/
+│   ├── dependabot.yml
+│   └── workflows/
+│       ├── ci.yml           # Lint, test and build
+│       └── release.yml      # Container image release
 ├── cmd/
 │   └── whelk/
 │       └── main.go          # Application entry point
@@ -125,6 +138,8 @@ go test -v ./...
 │   └── proxy/
 │       ├── handler.go       # HTTP/HTTPS proxy handler
 │       └── handler_test.go  # Proxy handler tests
+├── .golangci.yml            # golangci-lint configuration
+├── mise.toml                # Pinned tools and tasks
 ├── go.mod
 ├── go.sum
 ├── Dockerfile               # Multi-stage Docker build

@@ -1,0 +1,15 @@
+# Build artifacts
+/whelk
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

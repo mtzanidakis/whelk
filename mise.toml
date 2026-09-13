@@ -1,0 +1,35 @@
+[tools]
+go = "1.27.1"
+golangci-lint = "2.13.2"
+
+[tasks.build]
+description = "Build the whelk binary"
+run = "go build -o whelk ./cmd/whelk"
+
+[tasks.test]
+description = "Run the unit tests"
+run = "go test ./..."
+
+[tasks."test:race"]
+description = "Run the unit tests with the race detector"
+run = "go test -race ./..."
+
+[tasks."test:cover"]
+description = "Run the unit tests with coverage"
+run = "go test -cover ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.fmt]
+description = "Format the Go source"
+run = "go fmt ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.ci]
+description = "Run all checks as CI does"
+depends = ["vet", "lint", "test", "build"]

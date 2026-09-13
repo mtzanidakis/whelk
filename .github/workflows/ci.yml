@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up tools
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
+
+      - name: Run go vet
+        run: mise run vet
+
+      - name: Run golangci-lint
+        run: mise run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up tools
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
+
+      - name: Run tests with race detector
+        run: mise run test:race
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up tools
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
+
+      - name: Build binary
+        run: mise run build
