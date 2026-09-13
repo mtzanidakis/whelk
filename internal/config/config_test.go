@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoad_Defaults(t *testing.T) {
-	// Clear environment variables
+	// Clear environment variables so the defaults are exercised.
 	os.Clearenv()
 
 	cfg, err := Load()
@@ -28,11 +28,9 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_CustomValues(t *testing.T) {
-	// Set environment variables
-	os.Setenv("BIND_HOST", "127.0.0.1")
-	os.Setenv("BIND_PORT", "8080")
-	os.Setenv("TIMEOUT", "30s")
-	defer os.Clearenv()
+	t.Setenv("BIND_HOST", "127.0.0.1")
+	t.Setenv("BIND_PORT", "8080")
+	t.Setenv("TIMEOUT", "30s")
 
 	cfg, err := Load()
 	if err != nil {
@@ -52,12 +50,20 @@ func TestLoad_CustomValues(t *testing.T) {
 }
 
 func TestLoad_InvalidTimeout(t *testing.T) {
-	os.Setenv("TIMEOUT", "invalid")
-	defer os.Clearenv()
+	t.Setenv("TIMEOUT", "invalid")
 
 	_, err := Load()
 	if err == nil {
 		t.Error("expected error for invalid timeout, got nil")
+	}
+}
+
+func TestLoad_InvalidPort(t *testing.T) {
+	t.Setenv("BIND_PORT", "not-a-number")
+
+	_, err := Load()
+	if err == nil {
+		t.Error("expected error for invalid port, got nil")
 	}
 }
 

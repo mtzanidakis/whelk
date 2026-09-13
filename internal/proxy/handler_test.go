@@ -1,21 +1,25 @@
 package proxy
 
 import (
+	"bufio"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(io.Discard, nil))
+}
+
 func TestNew(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	timeout := 30 * time.Second
 
-	handler := New(timeout, logger)
+	handler := New(timeout, testLogger())
 
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
@@ -32,10 +36,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestHandleHTTP_MissingHost(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(30*time.Second, logger)
+	handler := New(30*time.Second, testLogger())
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -50,16 +53,15 @@ func TestHandleHTTP_ValidRequest(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Test", "value")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("upstream response"))
+		_, _ = w.Write([]byte("upstream response"))
 	}))
 	defer upstream.Close()
 
 	// Create proxy handler
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(30*time.Second, logger)
+	handler := New(30*time.Second, testLogger())
 
 	// Create proxy request
-	req := httptest.NewRequest(http.MethodGet, upstream.URL, nil)
+	req := httptest.NewRequest(http.MethodGet, upstream.URL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -79,11 +81,10 @@ func TestHandleHTTP_ValidRequest(t *testing.T) {
 }
 
 func TestHandleHTTP_InvalidUpstream(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(1*time.Second, logger)
+	handler := New(1*time.Second, testLogger())
 
 	// Request to non-existent host
-	req := httptest.NewRequest(http.MethodGet, "http://invalid-host-that-does-not-exist.local:9999/", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://invalid-host-that-does-not-exist.local:9999/", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -95,10 +96,9 @@ func TestHandleHTTP_InvalidUpstream(t *testing.T) {
 }
 
 func TestHandleConnect_MissingHost(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(30*time.Second, logger)
+	handler := New(30*time.Second, testLogger())
 
-	req := httptest.NewRequest(http.MethodConnect, "/", nil)
+	req := httptest.NewRequest(http.MethodConnect, "/", http.NoBody)
 	// Explicitly clear the Host header that httptest sets
 	req.Host = ""
 	rec := httptest.NewRecorder()
@@ -107,6 +107,72 @@ func TestHandleConnect_MissingHost(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestHandleConnect_Tunnel(t *testing.T) {
+	// Upstream server reachable through the CONNECT tunnel.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("tunneled"))
+	}))
+	defer upstream.Close()
+
+	handler := New(5*time.Second, testLogger())
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	proxyAddr := strings.TrimPrefix(proxyServer.URL, "http://")
+	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatalf("failed to dial proxy: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	connectReq := "CONNECT " + upstreamAddr + " HTTP/1.1\r\nHost: " + upstreamAddr + "\r\n\r\n"
+	if _, err := io.WriteString(conn, connectReq); err != nil {
+		t.Fatalf("failed to send CONNECT request: %v", err)
+	}
+
+	reader := bufio.NewReader(conn)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("failed to read status line: %v", err)
+	}
+	if !strings.Contains(statusLine, "200") {
+		t.Fatalf("expected 200 Connection Established, got %q", strings.TrimSpace(statusLine))
+	}
+
+	// Consume the remaining response headers up to the blank line.
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("failed to read response headers: %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+
+	// Send a request through the established tunnel.
+	request := "GET / HTTP/1.1\r\nHost: " + upstreamAddr + "\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(conn, request); err != nil {
+		t.Fatalf("failed to send tunneled request: %v", err)
+	}
+
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("failed to read tunneled response: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read tunneled body: %v", err)
+	}
+	if string(body) != "tunneled" {
+		t.Errorf("expected body 'tunneled', got %q", body)
 	}
 }
 
@@ -143,9 +209,9 @@ func TestRemoveHopByHopHeaders(t *testing.T) {
 
 func TestCopyHeaders(t *testing.T) {
 	src := http.Header{
-		"Content-Type":   []string{"application/json"},
-		"X-Multi":        []string{"value1", "value2"},
-		"Authorization":  []string{"Bearer token"},
+		"Content-Type":  []string{"application/json"},
+		"X-Multi":       []string{"value1", "value2"},
+		"Authorization": []string{"Bearer token"},
 	}
 
 	dst := http.Header{}
@@ -167,15 +233,14 @@ func TestHandleHTTP_StreamingResponse(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		for i := 0; i < 5; i++ {
-			w.Write([]byte("chunk "))
+			_, _ = w.Write([]byte("chunk "))
 		}
 	}))
 	defer upstream.Close()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(30*time.Second, logger)
+	handler := New(30*time.Second, testLogger())
 
-	req := httptest.NewRequest(http.MethodGet, upstream.URL, nil)
+	req := httptest.NewRequest(http.MethodGet, upstream.URL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -192,12 +257,11 @@ func TestHandleHTTP_POSTWithBody(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	}))
 	defer upstream.Close()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	handler := New(30*time.Second, logger)
+	handler := New(30*time.Second, testLogger())
 
 	requestBody := "test request body"
 	req := httptest.NewRequest(http.MethodPost, upstream.URL, strings.NewReader(requestBody))
