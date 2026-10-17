@@ -168,8 +168,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Wait for either direction to complete
-	<-errCh
-	// Note: We don't log errors here as they're expected when connections close
+	<-errCh //nolint:errcheck // errors are expected when either side closes the connection.
 }
 
 // removeHopByHopHeaders removes headers that shouldn't be forwarded
